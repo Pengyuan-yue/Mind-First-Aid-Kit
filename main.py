@@ -300,7 +300,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if "错误" in chunk:
                     raise Exception(chunk)
                 full_response += chunk
-                if full_response != last_sent:
+                # 确保响应不为空才更新消息
+                if full_response.strip() and full_response != last_sent:
                     try:
                         await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
                         last_sent = full_response
@@ -396,7 +397,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if "错误" in chunk:
                 raise Exception(chunk)
             full_response += chunk
-            if full_response != last_sent:
+            # 确保响应不为空才更新消息
+            if full_response.strip() and full_response != last_sent:
                 try:
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
                     last_sent = full_response
