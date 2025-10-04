@@ -192,6 +192,9 @@ def reset_all_daily_chats():
 
 def append_chat_log(user_id: int, role: str, content: str) -> None:
     """追加聊天记录到txt文件"""
+    import os
+    # 确保 chat_logs 目录存在
+    os.makedirs("chat_logs", exist_ok=True)
     log_file = f"chat_logs/{user_id}.txt"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(log_file, 'a', encoding='utf-8') as f:
