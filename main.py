@@ -315,6 +315,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             if typing_task:
                 typing_task.cancel()
+            
+            # 检查响应是否为空
+            if not full_response or not full_response.strip():
+                logger.warning(f"危机模式 AI 返回空响应 (用户 {chat_id})")
+                if message:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+                await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
+                return
+            
             # 检查是否为违规警告
             if "⚠️ 警告" in full_response and "违规内容" in full_response:
                 add_warning(chat_id)
@@ -333,7 +342,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                             pass
                         else:
                             raise edit_e
-            elif full_response:
+            else:
                 if full_response != last_sent:
                     try:
                         await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
@@ -344,9 +353,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                             raise edit_e
                 save_message(chat_id, "assistant", full_response)
                 append_chat_log(chat_id, "assistant", full_response)
-            else:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-                await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
         except asyncio.TimeoutError:
             logger.error(f"危机模式 AI 响应超时 (用户 {chat_id})")
             if message:
@@ -405,6 +411,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         if typing_task:
             typing_task.cancel()
+        
+        # 检查响应是否为空
+        if not full_response or not full_response.strip():
+            logger.warning(f"AI 返回空响应 (用户 {chat_id})")
+            if message:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+            error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：AI模型返回空响应，请稍后重试。"
+            await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
+            return
+        
         # 检查是否为违规警告
         if "⚠️ 警告" in full_response and "违规内容" in full_response:
             add_warning(chat_id)
@@ -423,7 +439,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         pass
                     else:
                         raise edit_e
-        elif full_response:
+        else:
             if full_response != last_sent:
                 try:
                     await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
@@ -448,11 +464,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     logger.info(f"心理评估更新 (用户 {chat_id}): 抑郁={assessment.get('depression', 0)}, 焦虑={assessment.get('anxiety', 0)}")
             except Exception as e:
                 logger.warning(f"心理评估失败: {e}")
-        else:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-            error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：网络问题或 API 限额。请稍后重试，或检查配置。"
-            await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
-            logger.error(f"AI 响应失败，发送错误消息 (用户 {chat_id})")
     except asyncio.TimeoutError:
         logger.error(f"AI 响应超时 (用户 {chat_id})")
         if message:
