@@ -1,5 +1,6 @@
 # ai_handler.py
 import logging
+import os
 from openai import AsyncOpenAI, APIError
 from config import OPENROUTER_API_KEY, AI_MODEL, AI_TEMPERATURE
 from prompts import SYSTEM_PROMPT
@@ -8,11 +9,30 @@ from typing import Optional, AsyncGenerator
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# 初始化 OpenAI 客户端，指向 OpenRouter
+# --- 修改开始 ---
+
+# 1. 准备自定义请求头
+# 这些请求头将被添加到所有发送到 OpenRouter 的请求中
+default_headers = {}
+http_referer = os.getenv("HTTP_REFERER")  # 你的网站 URL
+if http_referer:
+    default_headers["HTTP-Referer"] = http_referer
+
+# 注意：根据你的 .env 文件，环境变量名是 YOUR_SITE_NAME
+site_name = os.getenv("YOUR_SITE_NAME")
+if site_name:
+    default_headers["X-Title"] = site_name
+
+# 2. 初始化 OpenAI 客户端，并传入自定义请求头
+# 使用 `default_headers` 参数来设置自定义请求头
 client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
+    default_headers=default_headers,
 )
+
+# --- 修改结束 ---
+
 
 async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max_tokens: Optional[int] = None) -> Optional[str]:
     """
@@ -33,16 +53,9 @@ async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max
 
     try:
         logging.info(f"向 OpenRouter 发送非流式请求，模型: {AI_MODEL}, 历史长度: {len(history)}")
-        import os
-        extra_headers = {}
-        http_referer = os.getenv("HTTP_REFERER")
-        if http_referer:
-            extra_headers["HTTP-Referer"] = http_referer
-        site_name = os.getenv("SITE_NAME")
-        if site_name:
-            extra_headers["X-Title"] = site_name
+        
+        # 3. 移除函数内部重复的 extra_headers 逻辑
         kwargs = {
-            "extra_headers": extra_headers,
             "model": AI_MODEL,
             "messages": messages,
             "temperature": AI_TEMPERATURE,
@@ -88,16 +101,9 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
 
     try:
         logging.info(f"向 OpenRouter 发送流式请求，模型: {AI_MODEL}, 历史长度: {len(history)}")
-        import os
-        extra_headers = {}
-        http_referer = os.getenv("HTTP_REFERER")
-        if http_referer:
-            extra_headers["HTTP-Referer"] = http_referer
-        site_name = os.getenv("SITE_NAME")
-        if site_name:
-            extra_headers["X-Title"] = site_name
+        
+        # 4. 同样移除此处的 extra_headers 逻辑
         kwargs = {
-            "extra_headers": extra_headers,
             "model": AI_MODEL,
             "messages": messages,
             "temperature": AI_TEMPERATURE,
