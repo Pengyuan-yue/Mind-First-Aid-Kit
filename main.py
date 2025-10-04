@@ -6,8 +6,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.error import TimedOut, NetworkError
 from telegram.constants import ParseMode
 
-import pystray
-from PIL import Image
 import threading
 import time
 
@@ -49,8 +47,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 # 初始化数据库
 init_db()
 
-# 系统托盘相关
-bot_running = False
+# 全局变量
 application = None
 
 async def safe_send_message(bot, chat_id: int, text: str, parse_mode=None):
@@ -77,46 +74,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     elif "Pool timeout" in str(context.error):
         logger.warning(f"连接池超时: {context.error}. 考虑增加池大小。")
     # 可以添加重试逻辑或其他处理，但这里仅记录
-
-def create_image():
-    """创建一个更明显的图标，带文本"""
-    from PIL import ImageDraw, ImageFont
-    try:
-        image = Image.new('RGB', (64, 64), color='lightblue')
-        draw = ImageDraw.Draw(image)
-        # 尝试加载字体，fallback到默认
-        try:
-            font = ImageFont.truetype("arial.ttf", 12)
-        except:
-            font = ImageFont.load_default()
-        draw.text((10, 25), "MFA", fill='darkblue', font=font)
-        return image
-    except Exception as e:
-        logger.warning(f"图标创建失败，使用默认: {e}")
-        image = Image.new('RGB', (64, 64), color='blue')
-        return image
-
-def on_quit(icon, item):
-    icon.stop()
-
-def start_bot(icon, item):
-    global bot_running, application
-    if not bot_running:
-        logger.info("通过托盘手动启动 Bot")
-        _init_and_start_bot()
-        icon.notify('Bot 已启动', 'Mind First Aid Kit')
-    else:
-        icon.notify('Bot 已在运行', 'Mind First Aid Kit')
-
-def stop_bot(icon, item):
-    global bot_running, application
-    if bot_running and application:
-        bot_running = False
-        application.stop_running()
-        logger.info("Bot 已停止")
-        icon.notify('Bot 已停止', 'Mind First Aid Kit')
-    else:
-        icon.notify('Bot 未运行', 'Mind First Aid Kit')
 
 def check_inactive_users():
     """每分钟检查不活跃用户，10min无消息标记结束"""
@@ -189,7 +146,7 @@ def run_scheduler():
 
 def _init_and_start_bot():
     """初始化并启动 Bot"""
-    global bot_running, application
+    global application
     if not TELEGRAM_TOKEN:
         logger.error("错误：未设置 TELEGRAM_BOT_TOKEN 环境变量。")
         return
@@ -210,40 +167,15 @@ def _init_and_start_bot():
         application.add_error_handler(error_handler)
         logger.info("错误处理器已注册")
     
-    def run_bot():
-        global bot_running
-        bot_running = True
-        logger.info("机器人自动启动成功！托盘图标应在任务栏右下角可见。")
-        logger.info("使用 /help 测试命令，或发送消息测试响应。")
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            application.run_polling()  # type: ignore
-        finally:
-            loop.close()
-    
-    if not bot_running:
-        threading.Thread(target=run_bot, daemon=True).start()
-
-def setup_tray():
-    menu = pystray.Menu(
-        pystray.MenuItem("启动 Bot", start_bot),
-        pystray.MenuItem("停止 Bot", stop_bot),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("退出", on_quit)
-    )
-    image = create_image()
-    icon = pystray.Icon("Mind First Aid Kit", image, menu=menu)
-    
-    # 启动调度器线程
-    threading.Thread(target=run_scheduler, daemon=True).start()
-    
-    # 自动启动 Bot
-    _init_and_start_bot()
-    
-    logger.info("系统托盘已设置，图标: 蓝色 MFA (任务栏右下角)")
-    icon.run()
+    logger.info("机器人启动成功！")
+    logger.info("使用 /help 测试命令，或发送消息测试响应。")
+    try:
+        application.run_polling()  # type: ignore
+    except KeyboardInterrupt:
+        logger.info("收到退出信号，正在停止机器人...")
+        if application:
+            application.stop_running()
+        logger.info("机器人已停止运行")
 
 # --- 辅助函数 ---
 def is_crisis_message(text: Optional[str]) -> bool:
@@ -545,7 +477,7 @@ async def send_periodic_typing(bot, chat_id: int, interval: int):
         pass
 
 def main() -> None:
-    """启动机器人与系统托盘"""
+    """启动机器人"""
     # 增强日志配置，添加文件输出
     # 移除文件处理器，因为已在basicConfig中配置
     for handler in logger.handlers[:]:
@@ -561,7 +493,21 @@ def main() -> None:
     logger.info(f"OPENROUTER_API_KEY: {'设置' if OPENROUTER_API_KEY else '未设置'}")
     logger.info(f"AI_MODEL: {AI_MODEL}")
     
-    setup_tray()
+    # 启动调度器线程
+    threading.Thread(target=run_scheduler, daemon=True).start()
+    
+    # 启动机器人
+    _init_and_start_bot()
+    
+    try:
+        # 保持主线程运行
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("收到退出信号，正在停止机器人...")
+        if application:
+            application.stop_running()
+        logger.info("机器人已停止运行")
 
 if __name__ == '__main__':
     main()
