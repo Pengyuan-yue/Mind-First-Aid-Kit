@@ -4,6 +4,7 @@ import os
 import requests
 import json
 import sys
+from urllib.parse import quote
 from config import OPENROUTER_API_KEY, AI_MODEL, AI_TEMPERATURE
 from prompts import SYSTEM_PROMPT
 from typing import Optional, AsyncGenerator
@@ -41,7 +42,8 @@ async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max
 
         site_name = os.getenv("YOUR_SITE_NAME")
         if site_name:
-            headers["X-Title"] = site_name
+            # URL 编码以支持中文字符
+            headers["X-Title"] = quote(site_name, safe='')
 
         data = {
             "model": AI_MODEL,
@@ -98,7 +100,8 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
 
         site_name = os.getenv("YOUR_SITE_NAME")
         if site_name:
-            headers["X-Title"] = site_name
+            # URL 编码以支持中文字符
+            headers["X-Title"] = quote(site_name, safe='')
 
         data = {
             "model": AI_MODEL,
