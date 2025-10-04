@@ -1,6 +1,8 @@
 # ai_handler.py
 import logging
 import os
+# 新增 httpx 导入，用于底层客户端配置
+import httpx
 from openai import AsyncOpenAI, APIError
 from config import OPENROUTER_API_KEY, AI_MODEL, AI_TEMPERATURE
 from prompts import SYSTEM_PROMPT
@@ -9,42 +11,44 @@ from typing import Optional, AsyncGenerator
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# --- 修改开始 ---
+# --- 核心修改部分：客户端初始化 ---
 
 # 1. 准备自定义请求头
-# 这些请求头将被添加到所有发送到 OpenRouter 的请求中
 default_headers = {}
-http_referer = os.getenv("HTTP_REFERER")  # 你的网站 URL
+http_referer = os.getenv("HTTP_REFERER")
 if http_referer:
     default_headers["HTTP-Referer"] = http_referer
 
-# 注意：根据你的 .env 文件，环境变量名是 YOUR_SITE_NAME
 site_name = os.getenv("YOUR_SITE_NAME")
 if site_name:
     default_headers["X-Title"] = site_name
 
-# 2. 初始化 OpenAI 客户端，并传入自定义请求头
-# 使用 `default_headers` 参数来设置自定义请求头
+# 2. 解决服务器代理冲突：
+# 创建一个明确禁用系统代理的 httpx 客户端实例，
+# 并设置合理的超时时间。
+# 这通过将 proxies 设置为 None 或 {} 来阻止 httpx 自动从环境变量中读取代理。
+http_client_config = httpx.AsyncClient(
+    # 设置 proxies=None 来忽略系统环境变量中的代理配置
+    proxies=None,
+    # 设置一个合理的超时，以应对 OpenRouter 的慢响应或网络波动
+    timeout=httpx.Timeout(timeout=60.0, connect=10.0), 
+)
+
+# 3. 初始化 OpenAI 客户端，传入配置好的 httpx 客户端
 client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
     default_headers=default_headers,
+    # 关键：通过 http_client 参数传递我们自定义的 httpx 实例
+    http_client=http_client_config,
 )
 
-# --- 修改结束 ---
+# --- 核心修改部分结束 ---
 
 
 async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max_tokens: Optional[int] = None) -> Optional[str]:
     """
     调用 OpenRouter API 获取非流式 AI 回复。
-    
-    Args:
-        history: 对话历史列表。
-        system_prompt: 当前场景下的系统提示词。
-        max_tokens: 最大输出 token 数（可选，默认 None 表示无限制）。
- 
-    Returns:
-        AI 的回复文本，如果出错则返回 None。
     """
     messages = [
         {"role": "system", "content": system_prompt},
@@ -54,7 +58,6 @@ async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max
     try:
         logging.info(f"向 OpenRouter 发送非流式请求，模型: {AI_MODEL}, 历史长度: {len(history)}")
         
-        # 3. 移除函数内部重复的 extra_headers 逻辑
         kwargs = {
             "model": AI_MODEL,
             "messages": messages,
@@ -85,14 +88,6 @@ async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max
 async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_tokens: Optional[int] = None) -> AsyncGenerator[str, None]:
     """
     调用 OpenRouter API 获取流式 AI 回复。
-    
-    Args:
-        history: 对话历史列表。
-        system_prompt: 当前场景下的系统提示词。
-        max_tokens: 最大输出 token 数（可选，默认 None 表示无限制）。
- 
-    Yields:
-        逐步 yield 内容块。
     """
     messages = [
         {"role": "system", "content": system_prompt},
@@ -102,7 +97,6 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
     try:
         logging.info(f"向 OpenRouter 发送流式请求，模型: {AI_MODEL}, 历史长度: {len(history)}")
         
-        # 4. 同样移除此处的 extra_headers 逻辑
         kwargs = {
             "model": AI_MODEL,
             "messages": messages,
