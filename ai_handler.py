@@ -121,14 +121,13 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
         
         response.raise_for_status()
         
-        for chunk in response.iter_lines():
+        # 设置响应编码为 UTF-8
+        response.encoding = 'utf-8'
+        
+        for chunk in response.iter_lines(decode_unicode=True):
             if chunk:
-                try:
-                    decoded_chunk = chunk.decode('utf-8')
-                except UnicodeDecodeError:
-                    decoded_chunk = chunk.decode('utf-8', errors='ignore')
-                if decoded_chunk.startswith("data: "):
-                    data_str = decoded_chunk[6:]
+                if chunk.startswith("data: "):
+                    data_str = chunk[6:]
                     if data_str != "[DONE]":
                         try:
                             chunk_data = json.loads(data_str)

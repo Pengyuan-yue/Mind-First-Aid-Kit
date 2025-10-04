@@ -11,7 +11,7 @@ import time
 
 from config import TELEGRAM_TOKEN, OPENROUTER_API_KEY, AI_MODEL, CRISIS_KEYWORDS, MAX_HISTORY_LENGTH, CRISIS_RESOURCES
 from prompts import WELCOME_MESSAGE, HELP_MESSAGE, RESET_MESSAGE, API_ERROR_MESSAGE, CRISIS_STEP_1_MESSAGE, CRISIS_SYSTEM_PROMPT, SYSTEM_PROMPT
-from ai_handler import get_ai_response, get_ai_stream
+from ai_handler import get_ai_response
 from database import init_db, get_user, create_or_update_user, increment_daily_chat, add_warning, update_mental_scores, save_message, get_user_history, append_chat_log, update_chat_end_time, get_inactive_users, get_worst_users, reset_all_daily_chats
 from prompts import VIOLATION_CHECK_PROMPT, MENTAL_ASSESSMENT_PROMPT
 from config import VIOLATION_KEYWORDS
@@ -276,11 +276,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # 如果用户已处于危机模式
     if is_in_crisis:
         logger.info(f"用户 {chat_id} 处于危机模式，发送引导性回复。")
-        # Step 3: 限制AI响应（流式，集成违规检查）
+        # Step 3: 限制AI响应（非流式，集成违规检查）
         history.append({"role": "user", "content": user_text})
-        full_response = ""
-        message = None
-        typing_task = None
         user = get_user(chat_id)
         warning_count = user.get('warning_count', 0) if user is not None else 0
         try:
@@ -292,36 +289,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 """
             system_prompt_with_violation = CRISIS_SYSTEM_PROMPT + violation_instruction
 
-            # 发送初始消息
-            initial_text = "正在思考中..."
-            message = await context.bot.send_message(chat_id=chat_id, text=initial_text)
-            last_sent = initial_text
-            async for chunk in get_ai_stream(history, system_prompt=system_prompt_with_violation, max_tokens=100):
-                if "错误" in chunk:
-                    raise Exception(chunk)
-                full_response += chunk
-                # 确保响应不为空才更新消息
-                if full_response.strip() and full_response != last_sent:
-                    try:
-                        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                        last_sent = full_response
-                    except Exception as edit_e:
-                        if "Message is not modified" in str(edit_e):
-                            pass  # 忽略相同内容错误
-                        else:
-                            raise edit_e
-                # 每3秒发送typing
-                if typing_task is None or typing_task.done():
-                    typing_task = asyncio.create_task(send_periodic_typing(context.bot, chat_id, 3))
-            
-            if typing_task:
-                typing_task.cancel()
+            # 获取 AI 响应
+            full_response = await asyncio.wait_for(
+                get_ai_response(history, system_prompt=system_prompt_with_violation, max_tokens=100),
+                timeout=30.0
+            )
             
             # 检查响应是否为空
             if not full_response or not full_response.strip():
                 logger.warning(f"危机模式 AI 返回空响应 (用户 {chat_id})")
-                if message:
-                    await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
                 await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
                 return
             
@@ -332,38 +308,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.warning(f"用户 {chat_id} AI检测违规警告: {new_warning_count}")
                 if new_warning_count >= 5:
                     await safe_send_message(context.bot, chat_id, "🚫 您已被拉黑5次警告，无法继续使用。")
-                    # 更新用户为banned
-                    # 假设有update_user_banned函数
-                # 完成消息（警告）
-                if full_response != last_sent:
-                    try:
-                        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                    except Exception as edit_e:
-                        if "Message is not modified" in str(edit_e):
-                            pass
-                        else:
-                            raise edit_e
+                await safe_send_message(context.bot, chat_id, full_response)
             else:
-                if full_response != last_sent:
-                    try:
-                        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                    except Exception as edit_e:
-                        if "Message is not modified" in str(edit_e):
-                            pass
-                        else:
-                            raise edit_e
+                await safe_send_message(context.bot, chat_id, full_response)
                 save_message(chat_id, "assistant", full_response)
                 append_chat_log(chat_id, "assistant", full_response)
         except asyncio.TimeoutError:
             logger.error(f"危机模式 AI 响应超时 (用户 {chat_id})")
-            if message:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-                await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
+            await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
         except Exception as e:
             logger.error(f"危机模式 AI 错误: {e}")
-            if message:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-                await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
+            await safe_send_message(context.bot, chat_id, API_ERROR_MESSAGE + "\n\n" + CRISIS_RESOURCES, ParseMode.HTML)
         return
 
     # --- 正常聊天模式 ---
@@ -381,44 +336,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 """
     system_prompt_with_violation = SYSTEM_PROMPT + violation_instruction
 
-    # 获取 AI 回复（流式，集成违规检查）
+    # 获取 AI 回复（非流式，集成违规检查）
     logger.info(f"生成 AI 响应中... (用户 {chat_id})")
-    full_response = ""
-    message = None
-    typing_task = None
     user = get_user(chat_id)
-    warning_count = user.get('warning_count', 0) if user is not None else 0  # 假设数据库有warning_count字段
+    warning_count = user.get('warning_count', 0) if user is not None else 0
     try:
-        # 发送初始消息
-        initial_text = "正在思考中..."
-        message = await context.bot.send_message(chat_id=chat_id, text=initial_text)
-        last_sent = initial_text
-        async for chunk in get_ai_stream(history, system_prompt=system_prompt_with_violation):
-            if "错误" in chunk:
-                raise Exception(chunk)
-            full_response += chunk
-            # 确保响应不为空才更新消息
-            if full_response.strip() and full_response != last_sent:
-                try:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                    last_sent = full_response
-                except Exception as edit_e:
-                    if "Message is not modified" in str(edit_e):
-                        pass  # 忽略相同内容错误
-                    else:
-                        raise edit_e
-            # 每3秒发送typing
-            if typing_task is None or typing_task.done():
-                typing_task = asyncio.create_task(send_periodic_typing(context.bot, chat_id, 3))
-        
-        if typing_task:
-            typing_task.cancel()
+        # 获取 AI 响应
+        full_response = await asyncio.wait_for(
+            get_ai_response(history, system_prompt=system_prompt_with_violation),
+            timeout=30.0
+        )
         
         # 检查响应是否为空
         if not full_response or not full_response.strip():
             logger.warning(f"AI 返回空响应 (用户 {chat_id})")
-            if message:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
             error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：AI模型返回空响应，请稍后重试。"
             await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
             return
@@ -430,26 +361,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.warning(f"用户 {chat_id} AI检测违规警告: {new_warning_count}")
             if new_warning_count >= 5:
                 await safe_send_message(context.bot, chat_id, "🚫 您已被拉黑5次警告，无法继续使用。")
-                # 更新用户为banned
-                # 假设有update_user_banned函数
-            # 完成消息（警告）
-            if full_response != last_sent:
-                try:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                except Exception as edit_e:
-                    if "Message is not modified" in str(edit_e):
-                        pass
-                    else:
-                        raise edit_e
+            await safe_send_message(context.bot, chat_id, full_response)
         else:
-            if full_response != last_sent:
-                try:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=full_response)
-                except Exception as edit_e:
-                    if "Message is not modified" in str(edit_e):
-                        pass
-                    else:
-                        raise edit_e
+            await safe_send_message(context.bot, chat_id, full_response)
             logger.info(f"AI 响应生成成功 (用户 {chat_id}): {full_response[:50]}...")
             save_message(chat_id, "assistant", full_response)
             append_chat_log(chat_id, "assistant", full_response)
@@ -468,26 +382,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.warning(f"心理评估失败: {e}")
     except asyncio.TimeoutError:
         logger.error(f"AI 响应超时 (用户 {chat_id})")
-        if message:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-            error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：网络问题或 API 限额。请稍后重试，或检查配置。"
-            await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
+        error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：网络问题或 API 限额。请稍后重试，或检查配置。"
+        await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
     except Exception as e:
         logger.error(f"AI 生成错误: {e} (用户 {chat_id})")
-        if message:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
-            error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：网络问题或 API 限额。请稍后重试，或检查配置。"
-            await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
+        error_msg = API_ERROR_MESSAGE + "\n\n💡 可能原因：网络问题或 API 限额。请稍后重试，或检查配置。"
+        await safe_send_message(context.bot, chat_id, error_msg, ParseMode.HTML)
 
-
-async def send_periodic_typing(bot, chat_id: int, interval: int):
-    """周期性发送 typing 动作"""
-    try:
-        while True:
-            await bot.send_chat_action(chat_id=chat_id, action='typing')
-            await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        pass
 
 def main() -> None:
     """启动机器人"""
