@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # --- OpenRouter AI 配置 ---
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-AI_MODEL = "x-ai/grok-4-fast:free" 
+AI_MODEL = "z-ai/glm-4.5-air:free" 
 AI_TEMPERATURE = 0.6  
 
 # --- 会话管理 ---
@@ -25,8 +25,8 @@ CRISIS_KEYWORDS = [
 
 # --- 违规内容关键词 ---
 VIOLATION_KEYWORDS = [
-    # 暴力相关
-    "杀", "打死", "虐待", "伤害他人", "恐怖主义", "爆炸", "枪击",
+    # 暴力相关 (移除一些可能在情绪表达中出现的词)
+    "打死", "虐待", "伤害他人", "恐怖主义", "爆炸", "枪击",
     # 邪教相关 (避免宗教)
     "邪教", "洗脑", "邪门歪道", "非法组织", "极端主义",
     # 色情相关 (避免艺术/生理)

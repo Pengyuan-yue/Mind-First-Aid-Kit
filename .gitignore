@@ -1,1 +1,5 @@
 .env
+/chat_logs
+/__pycache__
+database.db
+bot.log
