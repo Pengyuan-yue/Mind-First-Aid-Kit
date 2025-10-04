@@ -3,9 +3,16 @@ import logging
 import os
 import requests
 import json
+import sys
 from config import OPENROUTER_API_KEY, AI_MODEL, AI_TEMPERATURE
 from prompts import SYSTEM_PROMPT
 from typing import Optional, AsyncGenerator
+
+# 配置控制台编码为UTF-8以支持中文
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -113,7 +120,10 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
         
         for chunk in response.iter_lines():
             if chunk:
-                decoded_chunk = chunk.decode('utf-8')
+                try:
+                    decoded_chunk = chunk.decode('utf-8')
+                except UnicodeDecodeError:
+                    decoded_chunk = chunk.decode('utf-8', errors='ignore')
                 if decoded_chunk.startswith("data: "):
                     data_str = decoded_chunk[6:]
                     if data_str != "[DONE]":
