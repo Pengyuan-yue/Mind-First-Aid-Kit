@@ -47,7 +47,7 @@ async def get_ai_response(history: list, system_prompt: str = SYSTEM_PROMPT, max
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
-            data=json.dumps(data)
+            data=json.dumps(data, ensure_ascii=False).encode('utf-8')
         )
         
         response.raise_for_status()
@@ -105,7 +105,7 @@ async def get_ai_stream(history: list, system_prompt: str = SYSTEM_PROMPT, max_t
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
-            data=json.dumps(data),
+            data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
             stream=True
         )
         
